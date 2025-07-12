@@ -27,7 +27,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 }
 
 func (a *App) Run() error {
-	a.log.Info("starting http server", logger.String("addr", a.cfg.HTTP.Addr))
+	a.log.Info("starting http server", slog.String("addr", a.cfg.HTTP.Addr))
 	return a.server.ListenAndServe()
 }
 
