@@ -16,9 +16,7 @@ type App struct {
 }
 
 func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error) {
-	// Here you would initialize your repository, cache, and broker
-	// For now, we'll just pass nil
-	orderHandler := customhttp.NewOrderHandler(nil) // Placeholder
+	orderHandler := customhttp.NewOrderHandler(nil)
 	server := customhttp.NewServer(cfg.HTTP, orderHandler)
 
 	return &App{

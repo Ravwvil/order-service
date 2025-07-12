@@ -7,20 +7,18 @@ import (
 	"strings"
 )
 
-// Config holds all configuration for the application
 type Config struct {
 	LogLevel string
 	HTTP     HTTPConfig
 	Postgres PostgresConfig
 	Kafka    KafkaConfig
+	Redis    RedisConfig
 }
 
-// HTTPConfig contains HTTP server configuration
 type HTTPConfig struct {
 	Addr string
 }
 
-// PostgresConfig contains PostgreSQL database configuration
 type PostgresConfig struct {
 	Host     string
 	Port     int
@@ -30,7 +28,6 @@ type PostgresConfig struct {
 	SSLMode  string
 }
 
-// DSN builds and returns the PostgreSQL connection string
 func (c PostgresConfig) DSN() string {
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
@@ -38,13 +35,18 @@ func (c PostgresConfig) DSN() string {
 	)
 }
 
-// KafkaConfig contains Kafka broker configuration
 type KafkaConfig struct {
 	Brokers []string
 	Topic   string
 }
 
-// New creates a new Config instance by loading from environment variables
+type RedisConfig struct {
+	Addr     string
+	Password string
+	DB       int
+	TTL      int // в секундах
+}
+
 func New() (*Config, error) {
 	cfg := &Config{
 		LogLevel: getEnv("LOG_LEVEL", "info"),
@@ -63,12 +65,17 @@ func New() (*Config, error) {
 			Brokers: getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
 			Topic:   getEnv("KAFKA_TOPIC", "orders"),
 		},
+		Redis: RedisConfig{
+			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvInt("REDIS_DB", 0),
+			TTL:      getEnvInt("REDIS_TTL", 3600),
+		},
 	}
 	
 	return cfg, nil
 }
 
-// Helper functions for environment variable loading
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
