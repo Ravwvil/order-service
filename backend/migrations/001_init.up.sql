@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS orders (
-    order_uid TEXT PRIMARY KEY, -- Поидее можно использовать UUID для уникальности
+    order_uid TEXT PRIMARY KEY,
     track_number TEXT NOT NULL,
     entry TEXT NOT NULL,
     locale TEXT NOT NULL,
