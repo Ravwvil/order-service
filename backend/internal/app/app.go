@@ -61,11 +61,14 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 
 	// Инициализация Kafka consumer
 	consumerCfg := kafka.Config{
-		Brokers:    cfg.Kafka.Brokers,
-		Topic:      cfg.Kafka.Topic,
-		GroupID:    cfg.Kafka.GroupID,
-		MaxRetries: cfg.Kafka.MaxRetries,
-		RetryDelay: time.Duration(cfg.Kafka.RetryDelay) * time.Second,
+		Brokers:           cfg.Kafka.Brokers,
+		Topic:             cfg.Kafka.Topic,
+		GroupID:           cfg.Kafka.GroupID,
+		MaxRetries:        cfg.Kafka.MaxRetries,
+		InitialRetryDelay: time.Duration(cfg.Kafka.InitialRetryDelay) * time.Second,
+		MaxRetryDelay:     time.Duration(cfg.Kafka.MaxRetryDelay) * time.Second,
+		BackoffFactor:     cfg.Kafka.BackoffFactor,
+		DLQTopic:          cfg.Kafka.DLQTopic,
 	}
 	consumer := kafka.NewConsumer(consumerCfg, orderService, log)
 

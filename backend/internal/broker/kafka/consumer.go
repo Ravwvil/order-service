@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -16,25 +18,32 @@ import (
 // Kafka consumer для обработки заказов
 type Consumer struct {
 	reader       *kafka.Reader
+	producer     *kafka.Writer // Для отправки в DLQ
 	orderService *service.OrderService
 	logger       *slog.Logger
 	wg           *sync.WaitGroup
 
 	// Конфигурация
-	brokers    []string
-	topic      string
-	groupID    string
-	maxRetries int
-	retryDelay time.Duration
+	brokers           []string
+	topic             string
+	groupID           string
+	maxRetries        int
+	initialRetryDelay time.Duration
+	maxRetryDelay     time.Duration
+	backoffFactor     float64
+	dlqTopic          string
 }
 
 // Config для Kafka consumer
 type Config struct {
-	Brokers    []string
-	Topic      string
-	GroupID    string
-	MaxRetries int
-	RetryDelay time.Duration
+	Brokers           []string
+	Topic             string
+	GroupID           string
+	MaxRetries        int
+	InitialRetryDelay time.Duration
+	MaxRetryDelay     time.Duration
+	BackoffFactor     float64
+	DLQTopic          string
 }
 
 func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Logger) *Consumer {
@@ -65,16 +74,29 @@ func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Lo
 		CommitInterval: 1 * time.Second,
 	})
 
+	var producer *kafka.Writer
+	if cfg.DLQTopic != "" {
+		producer = &kafka.Writer{
+			Addr:     kafka.TCP(cfg.Brokers...),
+			Topic:    cfg.DLQTopic,
+			Balancer: &kafka.LeastBytes{},
+		}
+	}
+
 	consumer := &Consumer{
-		reader:       reader,
-		orderService: orderService,
-		logger:       logger,
-		wg:           &sync.WaitGroup{},
-		brokers:      cfg.Brokers,
-		topic:        cfg.Topic,
-		groupID:      cfg.GroupID,
-		maxRetries:   cfg.MaxRetries,
-		retryDelay:   cfg.RetryDelay,
+		reader:            reader,
+		producer:          producer,
+		orderService:      orderService,
+		logger:            logger,
+		wg:                &sync.WaitGroup{},
+		brokers:           cfg.Brokers,
+		topic:             cfg.Topic,
+		groupID:           cfg.GroupID,
+		maxRetries:        cfg.MaxRetries,
+		initialRetryDelay: cfg.InitialRetryDelay,
+		maxRetryDelay:     cfg.MaxRetryDelay,
+		backoffFactor:     cfg.BackoffFactor,
+		dlqTopic:          cfg.DLQTopic,
 	}
 
 	logger.Info("kafka consumer created successfully",
@@ -91,7 +113,10 @@ func (c *Consumer) Start(ctx context.Context) error {
 		slog.String("group_id", c.groupID),
 		slog.Any("brokers", c.brokers),
 		slog.Int("max_retries", c.maxRetries),
-		slog.Duration("retry_delay", c.retryDelay))
+		slog.Duration("initial_retry_delay", c.initialRetryDelay),
+		slog.Duration("max_retry_delay", c.maxRetryDelay),
+		slog.Float64("backoff_factor", c.backoffFactor),
+		slog.String("dlq_topic", c.dlqTopic))
 
 	c.wg.Add(1)
 	go c.consumeMessages(ctx)
@@ -121,6 +146,13 @@ func (c *Consumer) Stop(ctx context.Context) error {
 	if err := c.reader.Close(); err != nil {
 		c.logger.Error("error closing kafka reader", slog.String("error", err.Error()))
 		return fmt.Errorf("failed to close kafka reader: %w", err)
+	}
+
+	if c.producer != nil {
+		if err := c.producer.Close(); err != nil {
+			c.logger.Error("error closing kafka dlq producer", slog.String("error", err.Error()))
+			return fmt.Errorf("failed to close kafka dlq producer: %w", err)
+		}
 	}
 
 	c.logger.Info("kafka consumer stopped successfully")
@@ -157,24 +189,43 @@ func (c *Consumer) consumeMessages(ctx context.Context) {
 				slog.Int("partition", msg.Partition))
 
 			// Обрабатываем сообщение
-			if err := c.processMessage(ctx, msg); err != nil {
-				c.logger.Error("error processing message",
-					slog.String("error", err.Error()),
-					slog.Int64("offset", msg.Offset),
-					slog.Int("partition", msg.Partition))
+			processingErr := c.processMessage(ctx, msg)
+			if processingErr == nil {
+				// Успешная обработка, коммитим
+				if err := c.reader.CommitMessages(ctx, msg); err != nil {
+					c.logger.Error("error committing message",
+						slog.String("error", err.Error()),
+						slog.Int64("offset", msg.Offset),
+						slog.Int("partition", msg.Partition))
+				} else {
+					c.logger.Debug("message committed successfully",
+						slog.Int64("offset", msg.Offset),
+						slog.Int("partition", msg.Partition))
+				}
 				continue
 			}
 
-			// Коммитим сообщение после успешной обработки
-			if err := c.reader.CommitMessages(ctx, msg); err != nil {
-				c.logger.Error("error committing message",
-					slog.String("error", err.Error()),
-					slog.Int64("offset", msg.Offset),
-					slog.Int("partition", msg.Partition))
-			} else {
-				c.logger.Debug("message committed successfully",
-					slog.Int64("offset", msg.Offset),
-					slog.Int("partition", msg.Partition))
+			// Ошибка обработки
+			c.logger.Error("error processing message, attempting to send to DLQ",
+				slog.String("error", processingErr.Error()),
+				slog.Int64("offset", msg.Offset),
+				slog.Int("partition", msg.Partition))
+
+			// Пытаемся отправить в DLQ
+			if dlqErr := c.handleFailedMessage(ctx, msg, processingErr); dlqErr != nil {
+				c.logger.Error("failed to send message to DLQ, message will be re-processed",
+					slog.String("dlq_error", dlqErr.Error()),
+					slog.Int64("offset", msg.Offset))
+				// Не коммитим, позволяем kafka-go повторить доставку
+				continue
+			}
+
+			// Успешно отправлено в DLQ, коммитим, чтобы не обрабатывать снова
+			c.logger.Info("message sent to DLQ, committing offset", slog.Int64("offset", msg.Offset))
+			if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
+				c.logger.Error("error committing message after sending to DLQ",
+					slog.String("error", commitErr.Error()),
+					slog.Int64("offset", msg.Offset))
 			}
 		}
 	}
@@ -203,7 +254,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg kafka.Message) error 
 	return c.processOrderWithRetry(ctx, &order)
 }
 
-// processOrderWithRetry обрабатывает заказ с механизмом повторных попыток
+// processOrderWithRetry обрабатывает заказ с механизмом повторных попыток и экспоненциальной задержкой
 func (c *Consumer) processOrderWithRetry(ctx context.Context, order *domain.Order) error {
 	c.logger.Debug("starting order processing with retry",
 		slog.String("order_uid", order.OrderUID),
@@ -232,17 +283,17 @@ func (c *Consumer) processOrderWithRetry(ctx context.Context, order *domain.Orde
 			slog.String("error", err.Error()))
 
 		if attempt < c.maxRetries {
-			retryDelay := c.retryDelay
+			delay := c.calculateBackoff(attempt)
 			c.logger.Debug("waiting before retry",
 				slog.String("order_uid", order.OrderUID),
-				slog.Duration("delay", retryDelay))
+				slog.Duration("delay", delay))
 
 			select {
 			case <-ctx.Done():
 				c.logger.Debug("context cancelled during retry wait",
 					slog.String("order_uid", order.OrderUID))
 				return ctx.Err()
-			case <-time.After(retryDelay): // Продолжение после задержки
+			case <-time.After(delay): // Продолжение после задержки
 			}
 		}
 	}
@@ -253,6 +304,67 @@ func (c *Consumer) processOrderWithRetry(ctx context.Context, order *domain.Orde
 		slog.String("error", lastErr.Error()))
 
 	return fmt.Errorf("failed to process order after %d attempts: %w", c.maxRetries, lastErr)
+}
+
+func (c *Consumer) calculateBackoff(attempt int) time.Duration {
+	if c.initialRetryDelay <= 0 || c.backoffFactor <= 1 || c.maxRetryDelay <= 0 {
+		return c.initialRetryDelay // Fallback to simple retry delay
+	}
+	backoff := float64(c.initialRetryDelay) * math.Pow(c.backoffFactor, float64(attempt-1))
+	delay := time.Duration(backoff)
+
+	// Добавляем джиттер
+	if delay > 0 {
+		jitterMax := int64(delay) / 10
+		if jitterMax > 0 {
+			jitter := time.Duration(rand.Int63n(jitterMax))
+			delay += jitter
+		}
+	}
+
+	if delay > c.maxRetryDelay {
+		delay = c.maxRetryDelay
+	}
+
+	return delay
+}
+
+// handleFailedMessage обрабатывает сообщение, которое не удалось обработать
+func (c *Consumer) handleFailedMessage(ctx context.Context, msg kafka.Message, processingErr error) error {
+	if c.producer == nil {
+		c.logger.Warn("DLQ producer is not configured, message will be re-processed or lost",
+			slog.Int64("offset", msg.Offset))
+		return nil // Не возвращаем ошибку, чтобы не зацикливаться, если DLQ не настроен
+	}
+
+	c.logger.Info("sending message to DLQ",
+		slog.String("dlq_topic", c.dlqTopic),
+		slog.Int64("offset", msg.Offset))
+
+	dlqMsg := kafka.Message{
+		Key:   msg.Key,
+		Value: msg.Value,
+		Headers: []kafka.Header{
+			{Key: "x-original-topic", Value: []byte(c.topic)},
+			{Key: "x-original-offset", Value: []byte(fmt.Sprintf("%d", msg.Offset))},
+			{Key: "x-original-partition", Value: []byte(fmt.Sprintf("%d", msg.Partition))},
+			{Key: "x-failure-reason", Value: []byte(processingErr.Error())},
+			{Key: "x-failed-at", Value: []byte(time.Now().UTC().Format(time.RFC3339))},
+		},
+	}
+
+	err := c.producer.WriteMessages(ctx, dlqMsg)
+	if err != nil {
+		c.logger.Error("failed to write message to DLQ",
+			slog.String("dlq_topic", c.dlqTopic),
+			slog.String("error", err.Error()))
+		return fmt.Errorf("failed to write to DLQ: %w", err)
+	}
+
+	c.logger.Info("message successfully sent to DLQ",
+		slog.Int64("offset", msg.Offset),
+		slog.String("dlq_topic", c.dlqTopic))
+	return nil
 }
 
 // Consumer Health проверяет состояние Kafka consumer

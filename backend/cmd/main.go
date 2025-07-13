@@ -17,7 +17,8 @@ func main() {
 	// Инициализация конфига
 	cfg, err := config.New()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		log.Printf("failed to load config: %v", err)
+		os.Exit(1)
 	}
 
 	// Инициализация логгера
