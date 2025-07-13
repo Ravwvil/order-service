@@ -15,7 +15,7 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-// Kafka consumer для обработки заказов
+// Consumer (Kafka) для обработки заказов
 type Consumer struct {
 	reader       *kafka.Reader
 	producer     *kafka.Writer // Для отправки в DLQ
@@ -367,7 +367,7 @@ func (c *Consumer) handleFailedMessage(ctx context.Context, msg kafka.Message, p
 	return nil
 }
 
-// Consumer Health проверяет состояние Kafka consumer
+// Health проверяет состояние Kafka consumer
 func (c *Consumer) Health(ctx context.Context) error {
 	// Проверяем подключение к Kafka через Dialer с контекстом
 	dialer := &kafka.Dialer{}
@@ -375,7 +375,11 @@ func (c *Consumer) Health(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("kafka dial error: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			c.logger.Warn("error closing kafka connection in health check", slog.String("error", err.Error()))
+		}
+	}()
 
 	// Проверяем lag на отрицательные значениях
 	stats := c.reader.Stats()
