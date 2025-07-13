@@ -36,8 +36,11 @@ func (c PostgresConfig) DSN() string {
 }
 
 type KafkaConfig struct {
-	Brokers []string
-	Topic   string
+	Brokers     []string
+	Topic       string
+	GroupID     string
+	MaxRetries  int
+	RetryDelay  int // в секундах
 }
 
 type RedisConfig struct {
@@ -62,8 +65,11 @@ func New() (*Config, error) {
 			SSLMode:  getEnv("POSTGRES_SSL_MODE", "disable"),
 		},
 		Kafka: KafkaConfig{
-			Brokers: getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
-			Topic:   getEnv("KAFKA_TOPIC", "orders"),
+			Brokers:    getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
+			Topic:      getEnv("KAFKA_TOPIC", "orders"),
+			GroupID:    getEnv("KAFKA_GROUP_ID", "order-service-consumer"),
+			MaxRetries: getEnvInt("KAFKA_MAX_RETRIES", 3),
+			RetryDelay: getEnvInt("KAFKA_RETRY_DELAY", 5),
 		},
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),

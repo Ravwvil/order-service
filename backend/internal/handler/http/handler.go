@@ -1,25 +1,42 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/Ravwvil/order-service/backend/internal/config"
+	"github.com/Ravwvil/order-service/backend/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 type OrderHandler struct {
-	// order service
+	orderService *service.OrderService
 }
 
-func NewOrderHandler( /* order service */ ) *OrderHandler {
+func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
 	return &OrderHandler{
-		// order service
+		orderService: orderService,
 	}
 }
 
 func (h *OrderHandler) GetOrderByUID(w http.ResponseWriter, r *http.Request) {
-	// Implementation to get order by UID
+	uid := chi.URLParam(r, "order_uid")
+	if uid == "" {
+		http.Error(w, "order_uid is required", http.StatusBadRequest)
+		return
+	}
+
+	order, err := h.orderService.GetOrderByUID(r.Context(), uid)
+	if err != nil {
+		http.Error(w, "Order not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(order); err != nil {
+		http.Error(w, "Failed to encode order", http.StatusInternalServerError)
+	}
 }
 
 func NewServer(cfg config.HTTPConfig, orderHandler *OrderHandler) *http.Server {

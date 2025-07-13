@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Ravwvil/order-service/backend/internal/app"
 	"github.com/Ravwvil/order-service/backend/internal/config"
@@ -35,8 +36,12 @@ func main() {
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
 
+	// Create context for application lifecycle
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Create a new application
-	a, err := app.New(context.Background(), cfg, logger)
+	a, err := app.New(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("failed to create app", slog.Any("error", err))
 		return
@@ -44,19 +49,30 @@ func main() {
 
 	// Run the application
 	go func() {
-		if err := a.Run(); err != nil {
+		if err := a.Run(ctx); err != nil {
 			logger.Error("error running app", slog.Any("error", err))
+			cancel() // Отменяем контекст при ошибке
 		}
 	}()
 
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+
+	select {
+	case <-quit:
+		logger.Info("received shutdown signal")
+	case <-ctx.Done():
+		logger.Info("application context cancelled")
+	}
 
 	logger.Info("shutting down server...")
 
-	if err := a.Stop(context.Background()); err != nil {
+	// Создаем контекст с таймаутом для graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := a.Stop(shutdownCtx); err != nil {
 		logger.Error("error stopping app", slog.Any("error", err))
 	}
 

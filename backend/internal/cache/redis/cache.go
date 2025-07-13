@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Redis кэш для заказов
+// Cache Redis для заказов
 type Cache struct {
 	client *redis.Client
 	ttl    time.Duration
@@ -43,10 +44,6 @@ func (c *Cache) Set(ctx context.Context, key string, order *domain.Order) {
 		return
 	}
 
-	// Используем переданный контекст с таймаутом
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	err = c.client.Set(ctx, "order:"+key, data, c.ttl).Err()
 	if err != nil {
 		c.logger.Error("Failed to set order in Redis cache",
@@ -64,7 +61,7 @@ func (c *Cache) Set(ctx context.Context, key string, order *domain.Order) {
 func (c *Cache) Get(ctx context.Context, key string) (*domain.Order, bool) {
 	data, err := c.client.Get(ctx, "order:"+key).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			c.logger.Debug("Order not found in Redis cache",
 				slog.String("key", key),
 			)
