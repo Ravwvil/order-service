@@ -145,8 +145,8 @@ func generateMockOrders(count int) []domain.Order {
 		r := rand.New(rand.NewSource(int64(workerID))) // устанавливаем разный seed для каждого инстанса
 
 		for range jobs {
-			orderUID := generateRandomString(19)
-			trackNumber := generateRandomString(13)
+			orderUID := generateRandomString(r, 19)
+			trackNumber := generateRandomString(r, 13)
 			now := time.Now()
 
 			goodsTotal := r.Intn(15000) + 500
