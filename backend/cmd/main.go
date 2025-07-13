@@ -14,13 +14,13 @@ import (
 )
 
 func main() {
-	// Initialize configuration
+	// Инициализация конфига
 	cfg, err := config.New()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// Initialize logger
+	// Инициализация логгера
 	var lvl slog.Level
 	switch cfg.LogLevel {
 	case "debug":
@@ -36,44 +36,43 @@ func main() {
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
 
-	// Create context for application lifecycle
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := context.Background()
 
-	// Create a new application
 	a, err := app.New(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("failed to create app", slog.Any("error", err))
-		return
+		os.Exit(1)
 	}
 
-	// Run the application
-	go func() {
-		if err := a.Run(ctx); err != nil {
-			logger.Error("error running app", slog.Any("error", err))
-			cancel() // Отменяем контекст при ошибке
-		}
-	}()
-
-	// Graceful shutdown
+	// Настройка graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Запуск приложения в горутине
+	appErr := make(chan error, 1)
+	go func() {
+		logger.Info("starting application")
+		if err := a.Run(ctx); err != nil {
+			logger.Error("error running app", slog.Any("error", err))
+			appErr <- err
+		}
+	}()
 
 	select {
 	case <-quit:
 		logger.Info("received shutdown signal")
-	case <-ctx.Done():
-		logger.Info("application context cancelled")
+	case err := <-appErr:
+		logger.Error("application error", slog.Any("error", err))
 	}
 
 	logger.Info("shutting down server...")
-
-	// Создаем контекст с таймаутом для graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
+	
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	if err := a.Stop(shutdownCtx); err != nil {
 		logger.Error("error stopping app", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	logger.Info("server gracefully stopped")
