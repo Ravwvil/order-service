@@ -47,8 +47,8 @@ func (s *OrderService) GetOrderByUID(ctx context.Context, uid string) (*domain.O
 	s.logger.Debug("order not found in cache, fetching from database", slog.String("uid", uid))
 	order, err := s.repo.GetByUID(ctx, uid)
 	if err != nil {
-		s.logger.Error("failed to get order from database", 
-			slog.String("uid", uid), 
+		s.logger.Error("failed to get order from database",
+			slog.String("uid", uid),
 			slog.String("error", err.Error()))
 		return nil, fmt.Errorf("failed to get order: %w", err)
 	}
@@ -66,7 +66,7 @@ func (s *OrderService) ProcessOrderMessage(ctx context.Context, order *domain.Or
 	// Валидируем заказ
 	validationResult := order.Validate()
 	if validationResult.HasErrors() {
-		s.logger.Error("order validation failed", 
+		s.logger.Error("order validation failed",
 			slog.String("order_uid", order.OrderUID),
 			slog.Any("errors", validationResult.Errors))
 		return fmt.Errorf("order validation failed: %w", validationResult.GetFirstError())
@@ -74,7 +74,7 @@ func (s *OrderService) ProcessOrderMessage(ctx context.Context, order *domain.Or
 
 	// Сохраняем в базу данных
 	if err := s.repo.Create(ctx, order); err != nil {
-		s.logger.Error("failed to save order to database", 
+		s.logger.Error("failed to save order to database",
 			slog.String("order_uid", order.OrderUID),
 			slog.String("error", err.Error()))
 		return fmt.Errorf("failed to save order: %w", err)
@@ -105,7 +105,7 @@ func (s *OrderService) RestoreCache(ctx context.Context) error {
 
 	// Загружаем в кэш
 	s.cache.LoadFromDB(ctx, orderMap)
-	
+
 	s.logger.Info("cache restoration completed", slog.Int("orders_count", len(orders)))
 	return nil
 }

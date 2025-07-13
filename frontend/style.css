@@ -1,82 +1,173 @@
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --background-color: #f8f9fa;
+    --surface-color: #ffffff;
+    --text-color: #212529;
+    --border-color: #dee2e6;
+    --error-color: #dc3545;
+    --font-family: 'Roboto', sans-serif;
+}
+
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background-color: #f4f7f6;
-    color: #333;
+    font-family: var(--font-family);
+    background-color: var(--background-color);
+    color: var(--text-color);
     margin: 0;
-    padding: 20px;
+    padding: 2rem;
     display: flex;
     justify-content: center;
-    align-items: flex-start;
-    min-height: 100vh;
 }
 
 .container {
-    background-color: #fff;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     width: 100%;
     max-width: 800px;
-}
-
-h1 {
-    text-align: center;
-    color: #2c3e50;
-    margin-bottom: 20px;
-}
-
-.search-container {
     display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
+    flex-direction: column;
+    gap: 1.5rem;
 }
 
-#orderIdInput {
+header {
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+header h1 {
+    font-weight: 500;
+}
+
+header p {
+    color: var(--secondary-color);
+}
+
+#order-form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+#order-form input {
     flex-grow: 1;
-    padding: 10px 15px;
-    border: 1px solid #ccc;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
     border-radius: 4px;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
-#getOrderBtn {
-    padding: 10px 20px;
-    background-color: #3498db;
+#order-form button {
+    padding: 0.75rem 1.5rem;
+    background-color: var(--primary-color);
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 16px;
-    transition: background-color 0.3s;
+    font-size: 1rem;
+    transition: background-color 0.2s ease-in-out;
 }
 
-#getOrderBtn:hover {
-    background-color: #2980b9;
+#order-form button:hover {
+    background-color: #0056b3;
 }
 
-.order-details {
-    margin-top: 20px;
-    background-color: #fdfdfd;
-    border: 1px solid #eee;
-    border-radius: 4px;
-    padding: 20px;
+.view-switcher {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+    justify-content: flex-end;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.loader {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid var(--primary-color);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 2rem auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 .error-message {
-    margin-top: 15px;
-    padding: 10px;
-    border-radius: 4px;
-    color: #721c24;
     background-color: #f8d7da;
+    color: var(--error-color);
+    padding: 1rem;
     border: 1px solid #f5c6cb;
-    display: none; /* Hidden by default */
+    border-radius: 4px;
+    text-align: center;
 }
 
-pre {
-    background-color: #ecf0f1;
-    padding: 15px;
-    border-radius: 4px;
+.order-details {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.card {
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.card h2, .card h3 {
+    margin-top: 0;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.card p {
+    margin: 0.5rem 0;
+    line-height: 1.6;
+}
+
+#items-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#items-table th, #items-table td {
+    text-align: left;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#items-table thead {
+    background-color: #f8f9fa;
+}
+
+#items-table th {
+    font-weight: 500;
+}
+
+#items-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.json-output {
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.json-output pre {
+    margin: 0;
     white-space: pre-wrap;
     word-wrap: break-word;
     font-family: 'Courier New', Courier, monospace;
+    background-color: #f8f9fa;
+    padding: 1rem;
+    border-radius: 4px;
 } 

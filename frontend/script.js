@@ -1,56 +1,112 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const orderIdInput = document.getElementById('orderIdInput');
-    const getOrderBtn = document.getElementById('getOrderBtn');
-    const orderDetailsContainer = document.getElementById('orderDetails');
-    const errorMessageContainer = document.getElementById('error-message');
+document.getElementById('order-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+    const orderUid = document.getElementById('order-uid').value.trim();
+    if (!orderUid) return;
 
-    getOrderBtn.addEventListener('click', fetchOrder);
-    orderIdInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            fetchOrder();
-        }
-    });
+    const orderDetailsDiv = document.getElementById('order-details');
+    const errorMessageDiv = document.getElementById('error-message');
+    const loader = document.getElementById('loader');
+    const jsonOutputDiv = document.getElementById('json-output');
+    const jsonToggle = document.getElementById('json-toggle');
 
-    async function fetchOrder() {
-        const orderId = orderIdInput.value.trim();
-        if (!orderId) {
-            showError('Please enter an Order UID.');
-            return;
-        }
+    // Reset UI
+    orderDetailsDiv.classList.add('hidden');
+    jsonOutputDiv.classList.add('hidden');
+    errorMessageDiv.classList.add('hidden');
+    loader.classList.remove('hidden');
+    errorMessageDiv.textContent = '';
 
-        clearDetails();
-
-        try {
-            // Using a relative URL, which will be proxied by Nginx
-            const response = await fetch(`/api/order/${orderId}`);
-
+    fetch(`/order/${orderUid}`)
+        .then(response => {
             if (!response.ok) {
-                const errorData = await response.text();
-                throw new Error(`Order not found or error fetching data. Status: ${response.status}. Details: ${errorData}`);
+                return response.text().then(text => {
+                    let message = `Ошибка: ${response.status}`;
+                    if (response.status === 404) {
+                        message = 'Заказ не найден.';
+                    } else if (text) {
+                        try {
+                            const errorJson = JSON.parse(text);
+                            message = errorJson.error || text;
+                        } catch (e) {
+                            message = text;
+                        }
+                    }
+                    throw new Error(message);
+                });
             }
+            return response.json();
+        })
+        .then(data => {
+            loader.classList.add('hidden');
+            if (jsonToggle.checked) {
+                displayOrderAsJson(data);
+            } else {
+                displayOrderData(data);
+            }
+        })
+        .catch(error => {
+            loader.classList.add('hidden');
+            errorMessageDiv.textContent = `Ошибка: ${error.message}`;
+            errorMessageDiv.classList.remove('hidden');
+        });
+});
 
-            const orderData = await response.json();
-            displayOrder(orderData);
+function displayOrderAsJson(data) {
+    const jsonOutputDiv = document.getElementById('json-output');
+    const pre = jsonOutputDiv.querySelector('pre');
+    pre.textContent = JSON.stringify(data, null, 2);
+    jsonOutputDiv.classList.remove('hidden');
+}
 
-        } catch (error) {
-            console.error('Fetch error:', error);
-            showError(error.message);
-        }
-    }
+function displayOrderData(data) {
+    const orderDetailsDiv = document.getElementById('order-details');
 
-    function displayOrder(data) {
-        const formattedJson = JSON.stringify(data, null, 2);
-        orderDetailsContainer.innerHTML = `<pre>${formattedJson}</pre>`;
-    }
+    // General Info
+    const generalInfo = document.getElementById('general-info');
+    generalInfo.innerHTML = `
+        <p><strong>UID Заказа:</strong> ${data.order_uid}</p>
+        <p><strong>Номер отслеживания:</strong> ${data.track_number}</p>
+        <p><strong>Покупатель(id):</strong> ${data.customer_id}</p>
+        <p><strong>Дата создания:</strong> ${new Date(data.date_created).toLocaleString()}</p>
+    `;
 
-    function showError(message) {
-        errorMessageContainer.textContent = message;
-        errorMessageContainer.style.display = 'block';
-    }
+    // Delivery Info
+    const deliveryInfo = document.getElementById('delivery-info');
+    deliveryInfo.innerHTML = `
+        <p><strong>Имя:</strong> ${data.delivery.name}</p>
+        <p><strong>Телефон:</strong> ${data.delivery.phone}</p>
+        <p><strong>Email:</strong> ${data.delivery.email}</p>
+        <p><strong>Адрес:</strong> ${data.delivery.city}, ${data.delivery.address}, ${data.delivery.zip}</p>
+        <p><strong>Регион:</strong> ${data.delivery.region}</p>
+    `;
 
-    function clearDetails() {
-        orderDetailsContainer.innerHTML = '';
-        errorMessageContainer.textContent = '';
-        errorMessageContainer.style.display = 'none';
-    }
-}); 
+    // Payment Info
+    const paymentInfo = document.getElementById('payment-info');
+    paymentInfo.innerHTML = `
+        <p><strong>Транзакция:</strong> ${data.payment.transaction}</p>
+        <p><strong>Валюта:</strong> ${data.payment.currency}</p>
+        <p><strong>Сумма:</strong> ${data.payment.amount} ${data.payment.currency}</p>
+        <p><strong>Стоимость доставки:</strong> ${data.payment.delivery_cost} ${data.payment.currency}</p>
+        <p><strong>Стоимость товаров:</strong> ${data.payment.goods_total} ${data.payment.currency}</p>
+        <p><strong>Банк:</strong> ${data.payment.bank}</p>
+        <p><strong>Провайдер:</strong> ${data.payment.provider}</p>
+    `;
+
+    // Items table
+    const itemsTbody = document.getElementById('items-tbody');
+    itemsTbody.innerHTML = ''; // Clear previous items
+    data.items.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${index + 1}</td>
+            <td>${item.name}</td>
+            <td>${item.brand}</td>
+            <td>${item.price} ${data.payment.currency}</td>
+            <td>${item.sale}%</td>
+            <td>${item.total_price} ${data.payment.currency}</td>
+        `;
+        itemsTbody.appendChild(row);
+    });
+    
+    orderDetailsDiv.classList.remove('hidden');
+} 

@@ -68,7 +68,7 @@ func New() (*Config, error) {
 			SSLMode:  getEnv("POSTGRES_SSL_MODE", "disable"),
 		},
 		Kafka: KafkaConfig{
-			Brokers:           getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
+			Brokers:           getEnvSlice("KAFKA_BROKERS", []string{"kafka:29092"}),
 			Topic:             getEnv("KAFKA_TOPIC", "orders"),
 			GroupID:           getEnv("KAFKA_GROUP_ID", "order-service-consumer"),
 			MaxRetries:        getEnvInt("KAFKA_MAX_RETRIES", 5),

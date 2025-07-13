@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -39,11 +40,19 @@ func (h *OrderHandler) GetOrderByUID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewServer(cfg config.HTTPConfig, orderHandler *OrderHandler) *http.Server {
+func NewServer(cfg config.HTTPConfig, orderHandler *OrderHandler, healthCheck func(ctx context.Context) error) *http.Server {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if err := healthCheck(r.Context()); err != nil {
+			http.Error(w, "health check failed", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 
 	r.Get("/order/{order_uid}", orderHandler.GetOrderByUID)
 

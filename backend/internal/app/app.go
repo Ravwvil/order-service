@@ -55,10 +55,6 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	// Инициализация сервисов
 	orderService := service.NewOrderService(orderRepo, cache, log)
 
-	// Инициализация HTTP обработчиков
-	orderHandler := customhttp.NewOrderHandler(orderService)
-	server := customhttp.NewServer(cfg.HTTP, orderHandler)
-
 	// Инициализация Kafka consumer
 	consumerCfg := kafka.Config{
 		Brokers:           cfg.Kafka.Brokers,
@@ -72,15 +68,21 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger) (*App, error
 	}
 	consumer := kafka.NewConsumer(consumerCfg, orderService, log)
 
-	return &App{
+	app := &App{
 		cfg:          cfg,
 		log:          log,
-		server:       server,
 		consumer:     consumer,
 		db:           db,
 		redis:        rdb,
 		orderService: orderService,
-	}, nil
+	}
+
+	// Инициализация HTTP обработчиков
+	orderHandler := customhttp.NewOrderHandler(orderService)
+	server := customhttp.NewServer(cfg.HTTP, orderHandler, app.Health)
+	app.server = server
+
+	return app, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
