@@ -18,7 +18,6 @@ COPY --from=builder /app/server .
 
 EXPOSE 8081
 
-# Healthcheck to ensure the server is ready before accepting traffic
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8081/healthz || exit 1
 

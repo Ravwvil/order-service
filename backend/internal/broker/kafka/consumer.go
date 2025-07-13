@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 
@@ -22,6 +23,8 @@ type Consumer struct {
 	orderService *service.OrderService
 	logger       *slog.Logger
 	wg           *sync.WaitGroup
+	cancel       context.CancelFunc
+	msgChan      chan kafka.Message
 
 	// Конфигурация
 	brokers           []string
@@ -32,6 +35,7 @@ type Consumer struct {
 	maxRetryDelay     time.Duration
 	backoffFactor     float64
 	dlqTopic          string
+	concurrency       int
 }
 
 // Config для Kafka consumer
@@ -44,6 +48,7 @@ type Config struct {
 	MaxRetryDelay     time.Duration
 	BackoffFactor     float64
 	DLQTopic          string
+	Concurrency       int
 }
 
 func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Logger) *Consumer {
@@ -51,6 +56,10 @@ func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Lo
 		slog.String("topic", cfg.Topic),
 		slog.String("group_id", cfg.GroupID),
 		slog.Any("brokers", cfg.Brokers))
+
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = runtime.NumCPU()
+	}
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: cfg.Brokers,
@@ -89,6 +98,7 @@ func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Lo
 		orderService:      orderService,
 		logger:            logger,
 		wg:                &sync.WaitGroup{},
+		msgChan:           make(chan kafka.Message, cfg.Concurrency),
 		brokers:           cfg.Brokers,
 		topic:             cfg.Topic,
 		groupID:           cfg.GroupID,
@@ -97,6 +107,7 @@ func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Lo
 		maxRetryDelay:     cfg.MaxRetryDelay,
 		backoffFactor:     cfg.BackoffFactor,
 		dlqTopic:          cfg.DLQTopic,
+		concurrency:       cfg.Concurrency,
 	}
 
 	logger.Info("kafka consumer created successfully",
@@ -116,10 +127,20 @@ func (c *Consumer) Start(ctx context.Context) error {
 		slog.Duration("initial_retry_delay", c.initialRetryDelay),
 		slog.Duration("max_retry_delay", c.maxRetryDelay),
 		slog.Float64("backoff_factor", c.backoffFactor),
-		slog.String("dlq_topic", c.dlqTopic))
+		slog.String("dlq_topic", c.dlqTopic),
+		slog.Int("concurrency", c.concurrency))
+
+	var consumerCtx context.Context
+	consumerCtx, c.cancel = context.WithCancel(ctx)
+
+	// Запускаем воркеров
+	for i := 0; i < c.concurrency; i++ {
+		c.wg.Add(1)
+		go c.worker(consumerCtx, i)
+	}
 
 	c.wg.Add(1)
-	go c.consumeMessages(ctx)
+	go c.consumeMessages(consumerCtx)
 
 	c.logger.Info("kafka consumer started successfully")
 	return nil
@@ -128,6 +149,9 @@ func (c *Consumer) Start(ctx context.Context) error {
 // Stop останавливает consumer и ждет завершения обработки
 func (c *Consumer) Stop(ctx context.Context) error {
 	c.logger.Info("stopping kafka consumer")
+
+	// Сигнализируем о завершении
+	c.cancel()
 
 	done := make(chan struct{})
 	go func() {
@@ -141,6 +165,9 @@ func (c *Consumer) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		c.logger.Warn("kafka consumer stop timeout")
 	}
+
+	// Закрываем канал сообщений
+	close(c.msgChan)
 
 	// Закрываем reader
 	if err := c.reader.Close(); err != nil {
@@ -159,34 +186,23 @@ func (c *Consumer) Stop(ctx context.Context) error {
 	return nil
 }
 
-// consumeMessages основной цикл чтения сообщений
-func (c *Consumer) consumeMessages(ctx context.Context) {
+func (c *Consumer) worker(ctx context.Context, id int) {
 	defer c.wg.Done()
+	c.logger.Info("starting worker", slog.Int("worker_id", id))
 
 	for {
 		select {
 		case <-ctx.Done():
-			c.logger.Info("consumer context cancelled, stopping")
+			c.logger.Info("worker context cancelled, stopping", slog.Int("worker_id", id))
 			return
-		default:
-			// Читаем сообщение с контекстом и таймаутом
-			msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			msg, err := c.reader.FetchMessage(msgCtx)
-			cancel()
-
-			if err != nil {
-				if ctx.Err() != nil {
-					// Контекст отменен, выходим
-					c.logger.Debug("context cancelled while fetching message")
-					return
-				}
-				c.logger.Error("error fetching message", slog.String("error", err.Error()))
-				continue
+		case msg, ok := <-c.msgChan:
+			if !ok {
+				c.logger.Info("message channel closed, stopping worker", slog.Int("worker_id", id))
+				return
 			}
-
-			c.logger.Debug("message fetched successfully",
-				slog.Int64("offset", msg.Offset),
-				slog.Int("partition", msg.Partition))
+			c.logger.Debug("worker received message",
+				slog.Int("worker_id", id),
+				slog.Int64("offset", msg.Offset))
 
 			// Обрабатываем сообщение
 			processingErr := c.processMessage(ctx, msg)
@@ -226,6 +242,47 @@ func (c *Consumer) consumeMessages(ctx context.Context) {
 				c.logger.Error("error committing message after sending to DLQ",
 					slog.String("error", commitErr.Error()),
 					slog.Int64("offset", msg.Offset))
+			}
+		}
+	}
+}
+
+// consumeMessages основной цикл чтения сообщений
+func (c *Consumer) consumeMessages(ctx context.Context) {
+	defer c.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Info("consumer context cancelled, stopping")
+			return
+		default:
+			// Читаем сообщение с контекстом и таймаутом
+			msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			msg, err := c.reader.FetchMessage(msgCtx)
+			cancel()
+
+			if err != nil {
+				if ctx.Err() != nil {
+					// Контекст отменен, выходим
+					c.logger.Debug("context cancelled while fetching message")
+					return
+				}
+				c.logger.Error("error fetching message", slog.String("error", err.Error()))
+				continue
+			}
+
+			c.logger.Debug("message fetched successfully",
+				slog.Int64("offset", msg.Offset),
+				slog.Int("partition", msg.Partition))
+
+			// Отправляем сообщение в канал для обработки воркерами
+			select {
+			case <-ctx.Done():
+				c.logger.Info("context cancelled, not sending message to worker", slog.Int64("offset", msg.Offset))
+				return
+			case c.msgChan <- msg:
+				c.logger.Debug("message sent to worker channel", slog.Int64("offset", msg.Offset))
 			}
 		}
 	}
@@ -385,6 +442,11 @@ func (c *Consumer) Health(ctx context.Context) error {
 	stats := c.reader.Stats()
 	if stats.Lag < 0 {
 		return fmt.Errorf("kafka reader lag negative: %d", stats.Lag)
+	}
+
+	// Проверяем, что воркеры запущены
+	if c.concurrency > 0 && c.msgChan == nil {
+		return fmt.Errorf("consumer is not running, msgChan is nil")
 	}
 
 	return nil

@@ -24,6 +24,6 @@ var (
 	//go:embed queries/select_items_by_uid.sql
 	selectItemsByUIDQuery string
 
-	//go:embed queries/select_all_orders.sql
-	selectAllOrdersQuery string
+	//go:embed queries/select_all_orders_with_items.sql
+	selectAllOrdersWithItemsQuery string
 )

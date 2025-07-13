@@ -44,6 +44,7 @@ type KafkaConfig struct {
 	MaxRetryDelay     int     // в секундах
 	BackoffFactor     float64
 	DLQTopic          string
+	Concurrency       int
 }
 
 type RedisConfig struct {
@@ -76,6 +77,7 @@ func New() (*Config, error) {
 			MaxRetryDelay:     getEnvInt("KAFKA_MAX_RETRY_DELAY_S", 60),
 			BackoffFactor:     getEnvFloat("KAFKA_BACKOFF_FACTOR", 2.0),
 			DLQTopic:          getEnv("KAFKA_DLQ_TOPIC", "orders-dlq"),
+			Concurrency:       getEnvInt("KAFKA_CONCURRENCY", 0),
 		},
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),

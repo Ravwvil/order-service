@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Ravwvil/order-service/backend/internal/domain"
@@ -49,6 +50,22 @@ type orderRow struct {
 	DeliveryCost sql.NullInt64  `db:"delivery_cost"`
 	GoodsTotal   sql.NullInt64  `db:"goods_total"`
 	CustomFee    sql.NullInt64  `db:"custom_fee"`
+}
+
+type orderWithItemsRow struct {
+	orderRow
+	// Item fields (nullable)
+	ChrtID          sql.NullInt64  `db:"chrt_id"`
+	ItemTrackNumber sql.NullString `db:"item_track_number"`
+	Price           sql.NullInt64  `db:"price"`
+	Rid             sql.NullString `db:"rid"`
+	ItemName        sql.NullString `db:"item_name"`
+	Sale            sql.NullInt64  `db:"sale"`
+	Size            sql.NullString `db:"size"`
+	TotalPrice      sql.NullInt64  `db:"total_price"`
+	NmID            sql.NullInt64  `db:"nm_id"`
+	Brand           sql.NullString `db:"brand"`
+	Status          sql.NullInt64  `db:"status"`
 }
 
 // toDomainOrder преобразует orderRow в domain.Order
@@ -230,20 +247,41 @@ func (r *OrderRepository) createItems(ctx context.Context, tx *sqlx.Tx, orderUID
 		return nil
 	}
 
-	for _, item := range items {
-		// Устанавливаем order_uid для связи
-		item.OrderUID = orderUID
-
-		_, err := tx.NamedExecContext(ctx, insertItemQuery, item)
-		if err != nil {
-			r.logger.Error("failed to insert item",
-				slog.String("order_uid", orderUID),
-				slog.Int("chrt_id", item.ChrtID),
-				slog.Any("error", err))
-			return err
-		}
+	// Подготавливаем запрос для массовой вставки
+	query, args, err := r.buildBulkInsertItemsQuery(orderUID, items)
+	if err != nil {
+		return err
 	}
+
+	// Выполняем запрос
+	_, err = tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		r.logger.Error("failed to bulk insert items",
+			slog.String("order_uid", orderUID),
+			slog.Any("error", err))
+		return err
+	}
+
 	return nil
+}
+
+func (r *OrderRepository) buildBulkInsertItemsQuery(orderUID string, items []domain.Item) (string, []interface{}, error) {
+	if len(items) == 0 {
+		return "", nil, errors.New("no items to insert")
+	}
+
+	var valueStrings []string
+	var valueArgs []interface{}
+	i := 1
+	for _, item := range items {
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			i, i+1, i+2, i+3, i+4, i+5, i+6, i+7, i+8, i+9, i+10, i+11))
+		valueArgs = append(valueArgs, orderUID, item.ChrtID, item.TrackNumber, item.Price, item.Rid, item.Name, item.Sale, item.Size, item.TotalPrice, item.NmID, item.Brand, item.Status)
+		i += 12
+	}
+
+	query := fmt.Sprintf("%s %s", insertItemQuery, strings.Join(valueStrings, ","))
+	return query, valueArgs, nil
 }
 
 func (r *OrderRepository) GetByUID(ctx context.Context, uid string) (*domain.Order, error) {
@@ -297,30 +335,48 @@ func (r *OrderRepository) getOrderItems(ctx context.Context, orderUID string) ([
 }
 
 func (r *OrderRepository) GetAll(ctx context.Context) ([]*domain.Order, error) {
-	var orderRows []orderRow
-	err := r.db.SelectContext(ctx, &orderRows, selectAllOrdersQuery)
+	var rows []orderWithItemsRow
+	err := r.db.SelectContext(ctx, &rows, selectAllOrdersWithItemsQuery)
 	if err != nil {
-		r.logger.Error("failed to get all orders", slog.Any("error", err))
-		return nil, fmt.Errorf("failed to get all orders: %w", err)
+		r.logger.Error("failed to get all orders with items", slog.Any("error", err))
+		return nil, fmt.Errorf("failed to get all orders with items: %w", err)
 	}
 
-	orders := make([]*domain.Order, 0, len(orderRows))
+	ordersMap := make(map[string]*domain.Order)
+	orderedUIDs := make([]string, 0)
 
-	// Обрабатываем каждую строку
-	for _, row := range orderRows {
-		order := row.toDomainOrder()
-
-		// Получаем items для каждого заказа
-		items, err := r.getOrderItems(ctx, row.OrderUID)
-		if err != nil {
-			r.logger.Error("failed to get order items",
-				slog.String("order_uid", row.OrderUID),
-				slog.Any("error", err))
-			return nil, fmt.Errorf("failed to get items for order %s: %w", row.OrderUID, err)
+	for _, row := range rows {
+		if _, exists := ordersMap[row.OrderUID]; !exists {
+			order := row.orderRow.toDomainOrder()
+			order.Items = []domain.Item{} // Initialize items slice
+			ordersMap[row.OrderUID] = order
+			orderedUIDs = append(orderedUIDs, row.OrderUID)
 		}
-		order.Items = items
 
-		orders = append(orders, order)
+		if row.ChrtID.Valid {
+			item := domain.Item{
+				OrderUID:    row.OrderUID,
+				ChrtID:      int(row.ChrtID.Int64),
+				TrackNumber: row.ItemTrackNumber.String,
+				Price:       int(row.Price.Int64),
+				Rid:         row.Rid.String,
+				Name:        row.ItemName.String,
+				Sale:        int(row.Sale.Int64),
+				Size:        row.Size.String,
+				TotalPrice:  int(row.TotalPrice.Int64),
+				NmID:        int(row.NmID.Int64),
+				Brand:       row.Brand.String,
+				Status:      int(row.Status.Int64),
+			}
+			order := ordersMap[row.OrderUID]
+			order.Items = append(order.Items, item)
+		}
+	}
+
+	// Preserve original order
+	orders := make([]*domain.Order, len(orderedUIDs))
+	for i, uid := range orderedUIDs {
+		orders[i] = ordersMap[uid]
 	}
 
 	r.logger.Info("retrieved all orders successfully",

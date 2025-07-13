@@ -95,8 +95,28 @@ func (c *Cache) LoadFromDB(ctx context.Context, orders map[string]*domain.Order)
 		slog.Int("count", len(orders)),
 	)
 
+	if len(orders) == 0 {
+		return
+	}
+
+	pipe := c.client.Pipeline()
 	for key, order := range orders {
-		c.Set(ctx, key, order)
+		data, err := json.Marshal(order)
+		if err != nil {
+			c.logger.Error("Failed to marshal order for Redis cache",
+				slog.String("key", key),
+				slog.Any("error", err),
+			)
+			continue
+		}
+		pipe.Set(ctx, "order:"+key, data, c.ttl)
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		c.logger.Error("Failed to execute Redis pipeline",
+			slog.Any("error", err),
+		)
 	}
 
 	c.logger.Info("Finished loading orders from database to Redis cache",

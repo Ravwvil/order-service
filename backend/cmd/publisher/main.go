@@ -8,6 +8,8 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/Ravwvil/order-service/backend/internal/domain"
@@ -74,109 +76,163 @@ func run() error {
 	log.Printf("%d mock orders generated.", len(orders))
 
 	fmt.Println("--- Published Order UIDs ---")
-	for _, order := range orders {
-		orderJSON, err := json.Marshal(order)
-		if err != nil {
-			log.Printf("ERROR: Failed to marshal order %s to JSON: %v", order.OrderUID, err)
-			continue
-		}
 
-		err = writer.WriteMessages(context.Background(),
-			kafka.Message{
-				Key:   []byte(order.OrderUID),
-				Value: orderJSON,
-			},
-		)
-		if err != nil {
-			log.Printf("ERROR: Failed to write message for order %s: %v", order.OrderUID, err)
-		} else {
-			fmt.Println(order.OrderUID)
-		}
+	var wg sync.WaitGroup
+	numPublishWorkers := runtime.NumCPU()
+	if len(orders) < numPublishWorkers {
+		numPublishWorkers = len(orders)
 	}
+	if numPublishWorkers == 0 {
+		numPublishWorkers = 1
+	}
+
+	orderChan := make(chan domain.Order, len(orders))
+
+	for i := 0; i < numPublishWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for order := range orderChan {
+				orderJSON, err := json.Marshal(order)
+				if err != nil {
+					log.Printf("ERROR: Failed to marshal order %s to JSON: %v", order.OrderUID, err)
+					continue
+				}
+
+				err = writer.WriteMessages(context.Background(),
+					kafka.Message{
+						Key:   []byte(order.OrderUID),
+						Value: orderJSON,
+					},
+				)
+				if err != nil {
+					log.Printf("ERROR: Failed to write message for order %s: %v", order.OrderUID, err)
+				} else {
+					fmt.Println(order.OrderUID)
+				}
+			}
+		}()
+	}
+
+	for _, order := range orders {
+		orderChan <- order
+	}
+	close(orderChan)
+
+	wg.Wait()
+
 	fmt.Println("--------------------------")
 	log.Println("Finished sending mock orders.")
 	return nil
 }
 
 func generateMockOrders(count int) []domain.Order {
-	var orders []domain.Order
+	if count <= 0 {
+		return []domain.Order{}
+	}
+
+	numWorkers := runtime.NumCPU()
+	if count < numWorkers {
+		numWorkers = count
+	}
+
+	jobs := make(chan int, count)
+	results := make(chan domain.Order, count)
 	cities := []string{"Moscow", "Kazan", "Innopolis", "Penza", "Krasnodar", "St. Petersburg", "Novosibirsk"}
 	names := []string{"Ravil Kazeev", "Dmitriy Kuznetsov", "Vladimir Base", "Alexey Ivanov ", "Anna Petrova"}
 
-	for i := 0; i < count; i++ {
-		orderUID := generateRandomString(19)
-		trackNumber := generateRandomString(13)
-		now := time.Now()
+	worker := func(jobs <-chan int, results chan<- domain.Order, workerID int) {
+		r := rand.New(rand.NewSource(int64(workerID))) // устанавливаем разный seed для каждого инстанса
 
-		goodsTotal := rand.Intn(15000) + 500
-		deliveryCost := rand.Intn(2000) + 500
-		customFee := 0
+		for range jobs {
+			orderUID := generateRandomString(19)
+			trackNumber := generateRandomString(13)
+			now := time.Now()
 
-		itemsCount := rand.Intn(4) + 1
-		var items []domain.Item
-		for j := 0; j < itemsCount; j++ {
-			itemPrice := rand.Intn(4000) + 200
-			item := domain.Item{
-				ChrtID:      rand.Intn(1000000),
-				TrackNumber: trackNumber,
-				Price:       itemPrice,
-				Rid:         generateRandomString(21),
-				Name:        fmt.Sprintf("Item-%d", j+1),
-				Sale:        rand.Intn(60),
-				Size:        "0",
-				TotalPrice:  itemPrice - (itemPrice * rand.Intn(30) / 100),
-				NmID:        rand.Intn(5000000),
-				Brand:       "Some Brand",
-				Status:      202,
+			goodsTotal := r.Intn(15000) + 500
+			deliveryCost := r.Intn(2000) + 500
+			customFee := 0
+
+			itemsCount := r.Intn(4) + 1
+			var items []domain.Item
+			for j := 0; j < itemsCount; j++ {
+				itemPrice := r.Intn(4000) + 200
+				item := domain.Item{
+					ChrtID:      r.Intn(1000000),
+					TrackNumber: trackNumber,
+					Price:       itemPrice,
+					Rid:         generateRandomString(r, 21),
+					Name:        fmt.Sprintf("Item-%d", j+1),
+					Sale:        r.Intn(60),
+					Size:        "0",
+					TotalPrice:  itemPrice - (itemPrice * r.Intn(30) / 100),
+					NmID:        r.Intn(5000000),
+					Brand:       "Some Brand",
+					Status:      202,
+				}
+				items = append(items, item)
 			}
-			items = append(items, item)
-		}
 
-		order := domain.Order{
-			OrderUID:    orderUID,
-			TrackNumber: trackNumber,
-			Entry:       "WBIL",
-			Delivery: domain.Delivery{
-				Name:    names[rand.Intn(len(names))],
-				Phone:   fmt.Sprintf("+79%09d", rand.Intn(1000000000)),
-				Zip:     fmt.Sprintf("%06d", rand.Intn(1000000)),
-				City:    cities[rand.Intn(len(cities))],
-				Address: fmt.Sprintf("Some Street %d", rand.Intn(100)+1),
-				Region:  "Some Region",
-				Email:   fmt.Sprintf("user%d@example.com", rand.Intn(10000)),
-			},
-			Payment: domain.Payment{
-				Transaction:  orderUID,
-				RequestID:    "",
-				Currency:     "RUB",
-				Provider:     "wbpay",
-				Amount:       goodsTotal + deliveryCost + customFee,
-				PaymentDt:    now.Unix(),
-				Bank:         "sber",
-				DeliveryCost: deliveryCost,
-				GoodsTotal:   goodsTotal,
-				CustomFee:    customFee,
-			},
-			Items:             items,
-			Locale:            "ru",
-			InternalSignature: "",
-			CustomerID:        generateRandomString(10),
-			DeliveryService:   "meest",
-			ShardKey:          fmt.Sprintf("%d", rand.Intn(10)),
-			SmID:              rand.Intn(100),
-			DateCreated:       now,
-			OofShard:          "1",
+			order := domain.Order{
+				OrderUID:    orderUID,
+				TrackNumber: trackNumber,
+				Entry:       "WBIL",
+				Delivery: domain.Delivery{
+					Name:    names[r.Intn(len(names))],
+					Phone:   fmt.Sprintf("+79%09d", r.Intn(1000000000)),
+					Zip:     fmt.Sprintf("%06d", r.Intn(1000000)),
+					City:    cities[r.Intn(len(cities))],
+					Address: fmt.Sprintf("Some Street %d", r.Intn(100)+1),
+					Region:  "Some Region",
+					Email:   fmt.Sprintf("user%d@example.com", r.Intn(10000)),
+				},
+				Payment: domain.Payment{
+					Transaction:  orderUID,
+					RequestID:    "",
+					Currency:     "RUB",
+					Provider:     "wbpay",
+					Amount:       goodsTotal + deliveryCost + customFee,
+					PaymentDt:    now.Unix(),
+					Bank:         "sber",
+					DeliveryCost: deliveryCost,
+					GoodsTotal:   goodsTotal,
+					CustomFee:    customFee,
+				},
+				Items:             items,
+				Locale:            "ru",
+				InternalSignature: "",
+				CustomerID:        generateRandomString(r, 10),
+				DeliveryService:   "meest",
+				ShardKey:          fmt.Sprintf("%d", r.Intn(10)),
+				SmID:              r.Intn(100),
+				DateCreated:       now,
+				OofShard:          "1",
+			}
+			results <- order
 		}
-		orders = append(orders, order)
+	}
+
+	for w := 0; w < numWorkers; w++ {
+		go worker(jobs, results, w)
+	}
+
+	for j := 0; j < count; j++ {
+		jobs <- j
+	}
+	close(jobs)
+
+	orders := make([]domain.Order, count)
+	for a := 0; a < count; a++ {
+		orders[a] = <-results
 	}
 	return orders
 }
 
-func generateRandomString(length int) string {
+func generateRandomString(r *rand.Rand, length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, length)
 	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
+		b[i] = charset[r.Intn(len(charset))]
 	}
 	return string(b)
 }

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   frontend:
-    image: nginx:alpine
+    image: nginx:1.29.0-alpine
     ports:
       - "${FRONTEND_HOST_PORT:-8080}:80"
     volumes:
@@ -39,7 +39,7 @@ services:
     restart: on-failure
 
   postgres:
-    image: postgres:13
+    image: postgres:17.5-alpine
     restart: always
     environment:
       POSTGRES_DB: ${POSTGRES_DATABASE}
@@ -52,7 +52,7 @@ services:
       - ./backend/migrations:/docker-entrypoint-initdb.d/
 
   redis:
-    image: redis:6.2-alpine
+    image: redis:8.0.3-alpine
     restart: always
     ports:
       - "${REDIS_HOST_PORT:-6379}:6379"
@@ -60,7 +60,7 @@ services:
       - redis_data:/data
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.0.1
+    image: confluentinc/cp-zookeeper:7.2.15
     restart: always
     environment:
       ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_CLIENT_PORT:-2181}
@@ -69,7 +69,7 @@ services:
       - "${ZOOKEEPER_HOST_PORT:-2181}:2181"
 
   kafka:
-    image: confluentinc/cp-kafka:7.0.1
+    image: confluentinc/cp-kafka:7.2.15
     restart: always
     depends_on:
       - zookeeper
@@ -89,4 +89,4 @@ services:
 
 volumes:
   postgres_data:
-  redis_data: 
+  redis_data:
