@@ -6,16 +6,21 @@ import (
 	"net/http"
 
 	"github.com/Ravwvil/order-service/backend/internal/config"
-	"github.com/Ravwvil/order-service/backend/internal/service"
+	"github.com/Ravwvil/order-service/backend/internal/domain"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-type OrderHandler struct {
-	orderService *service.OrderService
+// OrderServicer defines the interface for the order service.
+type OrderServicer interface {
+	GetOrderByUID(ctx context.Context, uid string) (*domain.Order, error)
 }
 
-func NewOrderHandler(orderService *service.OrderService) *OrderHandler {
+type OrderHandler struct {
+	orderService OrderServicer
+}
+
+func NewOrderHandler(orderService OrderServicer) *OrderHandler {
 	return &OrderHandler{
 		orderService: orderService,
 	}
@@ -40,7 +45,7 @@ func (h *OrderHandler) GetOrderByUID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewServer(cfg config.HTTPConfig, orderHandler *OrderHandler, healthCheck func(ctx context.Context) error) *http.Server {
+func NewRouter(orderHandler *OrderHandler, healthCheck func(ctx context.Context) error) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -56,8 +61,12 @@ func NewServer(cfg config.HTTPConfig, orderHandler *OrderHandler, healthCheck fu
 
 	r.Get("/order/{order_uid}", orderHandler.GetOrderByUID)
 
+	return r
+}
+
+func NewServer(cfg config.HTTPConfig, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:    cfg.Addr,
-		Handler: r,
+		Handler: handler,
 	}
 }

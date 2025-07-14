@@ -16,11 +16,18 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+// ConsumerInterface интерфейс для Kafka Consumer
+type ConsumerInterface interface {
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+	Health(ctx context.Context) error
+}
+
 // Consumer (Kafka) для обработки заказов
 type Consumer struct {
 	reader       *kafka.Reader
 	producer     *kafka.Writer // Для отправки в DLQ
-	orderService *service.OrderService
+	orderService service.OrderServicer
 	logger       *slog.Logger
 	wg           *sync.WaitGroup
 	cancel       context.CancelFunc
@@ -51,7 +58,7 @@ type Config struct {
 	Concurrency       int
 }
 
-func NewConsumer(cfg Config, orderService *service.OrderService, logger *slog.Logger) *Consumer {
+func NewConsumer(cfg Config, orderService service.OrderServicer, logger *slog.Logger) *Consumer {
 	logger.Debug("creating new kafka consumer",
 		slog.String("topic", cfg.Topic),
 		slog.String("group_id", cfg.GroupID),
@@ -319,7 +326,7 @@ func (c *Consumer) processOrderWithRetry(ctx context.Context, order *domain.Orde
 
 	var lastErr error
 
-	for attempt := 1; attempt <= c.maxRetries; attempt++ {
+	for attempt := 1; attempt <= c.maxRetries+1; attempt++ {
 		c.logger.Debug("attempting to process order",
 			slog.String("order_uid", order.OrderUID),
 			slog.Int("attempt", attempt))
@@ -339,7 +346,7 @@ func (c *Consumer) processOrderWithRetry(ctx context.Context, order *domain.Orde
 			slog.Int("max_retries", c.maxRetries),
 			slog.String("error", err.Error()))
 
-		if attempt < c.maxRetries {
+		if attempt <= c.maxRetries {
 			delay := c.calculateBackoff(attempt)
 			c.logger.Debug("waiting before retry",
 				slog.String("order_uid", order.OrderUID),
@@ -360,7 +367,7 @@ func (c *Consumer) processOrderWithRetry(ctx context.Context, order *domain.Orde
 		slog.Int("max_retries", c.maxRetries),
 		slog.String("error", lastErr.Error()))
 
-	return fmt.Errorf("failed to process order after %d attempts: %w", c.maxRetries, lastErr)
+	return fmt.Errorf("failed to process order after %d attempts: %w", c.maxRetries+1, lastErr)
 }
 
 func (c *Consumer) calculateBackoff(attempt int) time.Duration {
@@ -410,7 +417,12 @@ func (c *Consumer) handleFailedMessage(ctx context.Context, msg kafka.Message, p
 		},
 	}
 
-	err := c.producer.WriteMessages(ctx, dlqMsg)
+	// Используем новый контекст с таймаутом, чтобы гарантировать отправку в DLQ
+	// даже если основной контекст consumer'а уже отменен (например, при остановке).
+	dlqCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := c.producer.WriteMessages(dlqCtx, dlqMsg)
 	if err != nil {
 		c.logger.Error("failed to write message to DLQ",
 			slog.String("dlq_topic", c.dlqTopic),

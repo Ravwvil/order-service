@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestValidationResult тестирует методы ValidationResult.
 func TestValidationResult(t *testing.T) {
 	t.Run("AddError", func(t *testing.T) {
 		vr := &ValidationResult{Valid: true}
@@ -32,6 +33,7 @@ func TestValidationResult(t *testing.T) {
 	})
 }
 
+// validItem возвращает валидный Item для тестов.
 func validItem() Item {
 	return Item{
 		ChrtID:      123,
@@ -48,6 +50,7 @@ func validItem() Item {
 	}
 }
 
+// validDelivery возвращает валидный Delivery для тестов.
 func validDelivery() Delivery {
 	return Delivery{
 		Name:    "Test User",
@@ -60,6 +63,7 @@ func validDelivery() Delivery {
 	}
 }
 
+// validPayment возвращает валидный Payment для тестов.
 func validPayment() Payment {
 	return Payment{
 		Transaction:  "TXN123",
@@ -74,6 +78,7 @@ func validPayment() Payment {
 	}
 }
 
+// validOrder возвращает валидный Order для тестов.
 func validOrder() *Order {
 	return &Order{
 		OrderUID:    "ORDER123",
@@ -87,6 +92,7 @@ func validOrder() *Order {
 	}
 }
 
+// TestOrder_Validate тестирует логику валидации для структуры Order.
 func TestOrder_Validate(t *testing.T) {
 	t.Run("valid order", func(t *testing.T) {
 		order := validOrder()
@@ -97,23 +103,25 @@ func TestOrder_Validate(t *testing.T) {
 
 	t.Run("missing required fields", func(t *testing.T) {
 		testCases := []struct {
-			name  string
-			field *string
+			name    string
+			mutator func(*Order)
 		}{
-			{"order_uid", &validOrder().OrderUID},
-			{"track_number", &validOrder().TrackNumber},
-			{"entry", &validOrder().Entry},
-			{"locale", &validOrder().Locale},
-			{"customer_id", &validOrder().CustomerID},
+			{"order_uid", func(o *Order) { o.OrderUID = "" }},
+			{"track_number", func(o *Order) { o.TrackNumber = "" }},
+			{"entry", func(o *Order) { o.Entry = "" }},
+			{"locale", func(o *Order) { o.Locale = "" }},
+			{"customer_id", func(o *Order) { o.CustomerID = "" }},
 		}
 
 		for _, tc := range testCases {
-			order := validOrder()
-			*tc.field = ""
-			result := order.Validate()
-			assert.False(t, result.Valid)
-			assert.True(t, result.HasErrors())
-			assert.Equal(t, tc.name, result.Errors[0].Field)
+			t.Run(tc.name, func(t *testing.T) {
+				order := validOrder()
+				tc.mutator(order)
+				result := order.Validate()
+				assert.False(t, result.Valid)
+				assert.True(t, result.HasErrors())
+				assert.Equal(t, tc.name, result.Errors[0].Field)
+			})
 		}
 	})
 
@@ -154,6 +162,7 @@ func TestOrder_Validate(t *testing.T) {
 	})
 }
 
+// TestDelivery_Validate тестирует логику валидации для структуры Delivery.
 func TestDelivery_Validate(t *testing.T) {
 	t.Run("valid delivery", func(t *testing.T) {
 		delivery := validDelivery()
@@ -163,25 +172,28 @@ func TestDelivery_Validate(t *testing.T) {
 
 	t.Run("missing required fields", func(t *testing.T) {
 		testCases := []struct {
-			name  string
-			field *string
+			name    string
+			mutator func(*Delivery)
 		}{
-			{"name", &validDelivery().Name},
-			{"phone", &validDelivery().Phone},
-			{"city", &validDelivery().City},
-			{"address", &validDelivery().Address},
+			{"name", func(d *Delivery) { d.Name = " " }},
+			{"phone", func(d *Delivery) { d.Phone = " " }},
+			{"city", func(d *Delivery) { d.City = " " }},
+			{"address", func(d *Delivery) { d.Address = " " }},
 		}
 
 		for _, tc := range testCases {
-			delivery := validDelivery()
-			*tc.field = "  " // Test with whitespace
-			result := delivery.Validate()
-			assert.False(t, result.Valid)
-			assert.Equal(t, tc.name, result.Errors[0].Field)
+			t.Run(tc.name, func(t *testing.T) {
+				delivery := validDelivery()
+				tc.mutator(&delivery)
+				result := delivery.Validate()
+				assert.False(t, result.Valid)
+				assert.Equal(t, tc.name, result.Errors[0].Field)
+			})
 		}
 	})
 }
 
+// TestPayment_Validate тестирует логику валидации для структуры Payment.
 func TestPayment_Validate(t *testing.T) {
 	t.Run("valid payment", func(t *testing.T) {
 		payment := validPayment()
@@ -199,24 +211,29 @@ func TestPayment_Validate(t *testing.T) {
 
 	t.Run("negative values", func(t *testing.T) {
 		testCases := []struct {
-			name  string
-			field *int
+			name          string
+			mutator       func(*Payment)
+			expectedField string
 		}{
-			{"amount", &validPayment().Amount},
-			{"delivery_cost", &validPayment().DeliveryCost},
-			{"goods_total", &validPayment().GoodsTotal},
-			{"custom_fee", &validPayment().CustomFee},
+			{"amount", func(p *Payment) { p.Amount = -1 }, "amount"},
+			{"delivery_cost", func(p *Payment) { p.DeliveryCost = -1 }, "delivery_cost"},
+			{"goods_total", func(p *Payment) { p.GoodsTotal = -1 }, "goods_total"},
+			{"custom_fee", func(p *Payment) { p.CustomFee = -1 }, "custom_fee"},
 		}
 		for _, tc := range testCases {
-			payment := validPayment()
-			*tc.field = -1
-			result := payment.Validate()
-			assert.False(t, result.Valid)
-			assert.Equal(t, tc.name, result.Errors[0].Field)
+			t.Run(tc.name, func(t *testing.T) {
+				payment := validPayment()
+				tc.mutator(&payment)
+				result := payment.Validate()
+				assert.False(t, result.Valid)
+				assert.True(t, result.HasErrors())
+				assert.Equal(t, tc.expectedField, result.Errors[0].Field)
+			})
 		}
 	})
 }
 
+// TestItem_Validate тестирует логику валидации для структуры Item.
 func TestItem_Validate(t *testing.T) {
 	t.Run("valid item", func(t *testing.T) {
 		item := validItem()
@@ -226,8 +243,8 @@ func TestItem_Validate(t *testing.T) {
 
 	t.Run("invalid numeric fields", func(t *testing.T) {
 		testCases := []struct {
-			name      string
-			transform func(*Item)
+			name    string
+			mutator func(*Item)
 		}{
 			{"chrt_id", func(i *Item) { i.ChrtID = 0 }},
 			{"price", func(i *Item) { i.Price = -1 }},
@@ -237,32 +254,36 @@ func TestItem_Validate(t *testing.T) {
 			{"status", func(i *Item) { i.Status = -1 }},
 		}
 		for _, tc := range testCases {
-			item := validItem()
-			tc.transform(&item)
-			result := item.Validate()
-			assert.False(t, result.Valid, "failed on field "+tc.name)
-			assert.Equal(t, tc.name, result.Errors[0].Field)
+			t.Run(tc.name, func(t *testing.T) {
+				item := validItem()
+				tc.mutator(&item)
+				result := item.Validate()
+				assert.False(t, result.Valid, "failed on field "+tc.name)
+				assert.Equal(t, tc.name, result.Errors[0].Field)
+			})
 		}
 	})
 
 	t.Run("missing required string fields", func(t *testing.T) {
 		testCases := []struct {
-			name  string
-			field *string
+			name    string
+			mutator func(*Item)
 		}{
-			{"track_number", &validItem().TrackNumber},
-			{"rid", &validItem().Rid},
-			{"name", &validItem().Name},
-			{"size", &validItem().Size},
-			{"brand", &validItem().Brand},
+			{"track_number", func(i *Item) { i.TrackNumber = " " }},
+			{"rid", func(i *Item) { i.Rid = " " }},
+			{"name", func(i *Item) { i.Name = " " }},
+			{"size", func(i *Item) { i.Size = " " }},
+			{"brand", func(i *Item) { i.Brand = " " }},
 		}
 
 		for _, tc := range testCases {
-			item := validItem()
-			*tc.field = "  "
-			result := item.Validate()
-			assert.False(t, result.Valid)
-			assert.Equal(t, tc.name, result.Errors[0].Field)
+			t.Run(tc.name, func(t *testing.T) {
+				item := validItem()
+				tc.mutator(&item)
+				result := item.Validate()
+				assert.False(t, result.Valid)
+				assert.Equal(t, tc.name, result.Errors[0].Field)
+			})
 		}
 	})
 } 

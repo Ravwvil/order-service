@@ -15,18 +15,27 @@ services:
   app:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: cmd/app/Dockerfile
     restart: always
     ports:
       - "${HTTP_HOST_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     depends_on:
-      - postgres
-      - redis
-      - kafka
+      migrator:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
     env_file:
       - .env
     environment:
       - KAFKA_BROKERS=kafka:29092
+      - POSTGRES_HOST=postgres
 
   publisher:
     build:
@@ -36,6 +45,19 @@ services:
       - kafka
     environment:
       - KAFKA_BROKERS=kafka:29092
+    restart: on-failure
+
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: cmd/migrator/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=postgres
     restart: on-failure
 
   postgres:
@@ -49,7 +71,11 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:8.0.3-alpine

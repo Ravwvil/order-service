@@ -72,7 +72,7 @@ func run() error {
 	}()
 
 	log.Println("Generating mock orders...")
-	orders := generateMockOrders(15)
+	orders := generateMockOrders(100)
 	log.Printf("%d mock orders generated.", len(orders))
 
 	fmt.Println("--- Published Order UIDs ---")

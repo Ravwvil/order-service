@@ -20,6 +20,13 @@ type OrderCache interface {
 	LoadFromDB(ctx context.Context, orders map[string]*domain.Order)
 }
 
+// OrderServicer определяет интерфейс для сервиса
+type OrderServicer interface {
+	GetOrderByUID(ctx context.Context, uid string) (*domain.Order, error)
+	ProcessOrderMessage(ctx context.Context, order *domain.Order) error
+	RestoreCache(ctx context.Context) error
+}
+
 type OrderService struct {
 	repo   OrderRepository
 	cache  OrderCache
