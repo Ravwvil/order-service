@@ -63,7 +63,10 @@ func run() error {
 		Topic:        topic,
 		Balancer:     &kafka.LeastBytes{},
 		RequiredAcks: kafka.RequireOne,
-		Async:        false,
+		Async:        true,
+		ErrorLogger: kafka.LoggerFunc(func(msg string, args ...interface{}) {
+			log.Printf("KAFKA WRITER ERROR: "+msg, args...)
+		}),
 	}
 	defer func() {
 		if err := writer.Close(); err != nil {
@@ -72,7 +75,7 @@ func run() error {
 	}()
 
 	log.Println("Generating mock orders...")
-	orders := generateMockOrders(100)
+	orders := generateMockOrders(50)
 	log.Printf("%d mock orders generated.", len(orders))
 
 	fmt.Println("--- Published Order UIDs ---")

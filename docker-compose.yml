@@ -113,6 +113,15 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
 
+  tests:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.test
+    volumes:
+      - "//var/run/docker.sock:/var/run/docker.sock"
+    profiles:
+      - "tests"
+
 volumes:
   postgres_data:
   redis_data:

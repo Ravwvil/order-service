@@ -43,12 +43,12 @@ func main() {
 		if err == nil {
 			break
 		}
-		log.Printf("Failed to connect to db, retrying in %s... (%d/%d)", defaultRetryTimeout, i+1, defaultRetryAttempts)
+		log.Printf("Failed to initialize migrator (attempt %d/%d), retrying in %s. Error: %v", i+1, defaultRetryAttempts, defaultRetryTimeout, err)
 		time.Sleep(defaultRetryTimeout)
 	}
 
 	if err != nil {
-		log.Fatalf("failed to create migrate instance after multiple retries: %v", err)
+		log.Fatalf("failed to create migrate instance after %d attempts: %v", defaultRetryAttempts, err)
 	}
 
 	log.Println("Applying migrations...")

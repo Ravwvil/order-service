@@ -21,7 +21,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// Mock OrderService
 // MockOrderService мок для интерфейса OrderServicer.
 type MockOrderService struct {
 	mock.Mock

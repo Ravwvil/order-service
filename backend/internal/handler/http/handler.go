@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// OrderServicer defines the interface for the order service.
+// OrderServicer определяет интерфейс для сервиса 
 type OrderServicer interface {
 	GetOrderByUID(ctx context.Context, uid string) (*domain.Order, error)
 }

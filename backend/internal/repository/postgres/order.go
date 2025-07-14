@@ -247,7 +247,7 @@ func (r *OrderRepository) createItems(ctx context.Context, tx *sqlx.Tx, orderUID
 		return nil
 	}
 
-	// Подготавливаем запрос для массовой вставки
+	// Подготавливаем запрос для вставки
 	query, args, err := r.buildBulkInsertItemsQuery(orderUID, items)
 	if err != nil {
 		return err
@@ -274,6 +274,7 @@ func (r *OrderRepository) buildBulkInsertItemsQuery(orderUID string, items []dom
 	var valueArgs []interface{}
 	i := 1
 	for _, item := range items {
+		// Создаем строку с аргументами для вставки
 		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			i, i+1, i+2, i+3, i+4, i+5, i+6, i+7, i+8, i+9, i+10, i+11))
 		valueArgs = append(valueArgs, orderUID, item.ChrtID, item.TrackNumber, item.Price, item.Rid, item.Name, item.Sale, item.Size, item.TotalPrice, item.NmID, item.Brand, item.Status)
