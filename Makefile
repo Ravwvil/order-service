@@ -1,4 +1,4 @@
-.PHONY: build-tests run-tests up down pull-images
+.PHONY: build-tests test up down pull-images
 
 # ====================================================================================
 # DOCKER COMPOSE
@@ -28,6 +28,6 @@ build-tests:
 	@echo "Building test service image..."
 	docker-compose build tests
 
-run-tests: pull-images build-tests
+test: pull-images build-tests
 	@echo "Running tests..."
 	docker-compose run --rm tests 

@@ -28,10 +28,7 @@
 ```bash
 make test
 ```
-Или запустить тесты в специальном Docker-окружении, которое включает интеграционные тесты:
-```bash
-docker-compose --profile tests up --build
-```
+Эта команда предварительно загрузит необходимые для тестов Docker-образы (цель `pull-images`) и соберет тестовый сервис.
 
 ## Необходимые утилиты
 
@@ -92,4 +89,6 @@ docker-compose --profile tests up --build
 | --- | --- | --- |
 | **Сборка и запуск** | `make up` | `docker-compose up -d --build` |
 | **Остановка** | `make down` | `docker-compose down` |
-| **Запуск тестов** | `make run-tests`| `docker-compose build tests && docker-compose run --rm tests`|
+| **Загрузка образов для тестов** | `make pull-images` | `docker pull confluentinc/cp-zookeeper:7.1.1`<br/>`docker pull confluentinc/cp-kafka:7.1.1`<br/>`docker pull redis:7.2.5-alpine`<br/>`docker pull postgres:16.3-alpine`<br/>`docker pull testcontainers/ryuk:0.8.1` |
+| **Сборка тестового сервиса** | `make build-tests` | `docker-compose build tests` |
+| **Запуск тестов** | `make test`| `docker-compose build tests && docker-compose run --rm tests`|
