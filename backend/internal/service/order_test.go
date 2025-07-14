@@ -95,7 +95,7 @@ func newTestService(repo *MockOrderRepository, cache *MockOrderCache) *OrderServ
 // Tests
 // TestOrderService_GetOrderByUID тестирует метод GetOrderByUID.
 func TestOrderService_GetOrderByUID(t *testing.T) {
-	validOrder := loadOrderFromJSON(t, "validOrderPath")
+	validOrder := loadOrderFromJSON(t, validOrderPath)
 	uid := validOrder.OrderUID
 
 	t.Run("found in cache", func(t *testing.T) {
@@ -151,7 +151,7 @@ func TestOrderService_GetOrderByUID(t *testing.T) {
 
 // TestOrderService_ProcessOrderMessage тестирует метод ProcessOrderMessage.
 func TestOrderService_ProcessOrderMessage(t *testing.T) {
-	validOrder := loadOrderFromJSON(t, "validOrderPath")
+	validOrder := loadOrderFromJSON(t, validOrderPath)
 
 	t.Run("success", func(t *testing.T) {
 		repo := new(MockOrderRepository)
@@ -172,7 +172,7 @@ func TestOrderService_ProcessOrderMessage(t *testing.T) {
 		repo := new(MockOrderRepository)
 		cache := new(MockOrderCache)
 		service := newTestService(repo, cache)
-		invalidOrder := loadOrderFromJSON(t, "validOrderPath")
+		invalidOrder := loadOrderFromJSON(t, validOrderPath)
 		invalidOrder.OrderUID = "" // Make it invalid
 
 		err := service.ProcessOrderMessage(context.Background(), invalidOrder)
@@ -201,7 +201,7 @@ func TestOrderService_ProcessOrderMessage(t *testing.T) {
 
 // TestOrderService_RestoreCache тестирует метод RestoreCache.
 func TestOrderService_RestoreCache(t *testing.T) {
-	validOrder := loadOrderFromJSON(t, "validOrderPath")
+	validOrder := loadOrderFromJSON(t, validOrderPath)
 	orders := []*domain.Order{validOrder}
 	orderMap := map[string]*domain.Order{validOrder.OrderUID: validOrder}
 

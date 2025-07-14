@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -32,6 +33,21 @@ func (m *MockOrderService) ProcessOrderMessage(ctx context.Context, order *domai
 	return args.Error(0)
 }
 
+// GetOrderByUID мок для метода GetOrderByUID.
+func (m *MockOrderService) GetOrderByUID(ctx context.Context, uid string) (*domain.Order, error) {
+	args := m.Called(ctx, uid)
+	if order := args.Get(0); order != nil {
+		return order.(*domain.Order), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// RestoreCache мок для метода RestoreCache.
+func (m *MockOrderService) RestoreCache(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
 var (
 	kafkaBroker string
 	logger      *slog.Logger
@@ -42,8 +58,8 @@ const (
 	dlqTopic     = "test-orders-dlq"
 	testGroupID  = "test-consumer-group"
 	networkName  = "kafka-test-network"
-	zookeeperImg = "confluentinc/cp-zookeeper:7.2.1"
-	kafkaImg     = "confluentinc/cp-kafka:7.2.1"
+	zookeeperImg = "confluentinc/cp-zookeeper:7.1.1"
+	kafkaImg     = "confluentinc/cp-kafka:7.1.1"
 )
 
 // loadOrderFromJSON вспомогательная функция для загрузки заказа из JSON-файла.
@@ -136,6 +152,12 @@ func TestMain(m *testing.M) {
 	}
 	defer zookeeper.Terminate(ctx)
 
+	// Dynamically get the host from the running zookeeper container
+	host, err := zookeeper.Host(ctx)
+	if err != nil {
+		log.Fatalf("failed to get zookeeper host: %v", err)
+	}
+
 	kafkaContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        kafkaImg,
@@ -144,13 +166,15 @@ func TestMain(m *testing.M) {
 			Env: map[string]string{
 				"KAFKA_BROKER_ID":                        "1",
 				"KAFKA_ZOOKEEPER_CONNECT":                "zookeeper:2181",
-				"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":   "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT",
-				"KAFKA_ADVERTISED_LISTENERS":             "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093",
+				"KAFKA_LISTENERS":                        "INTERNAL://kafka:9092,EXTERNAL://0.0.0.0:9093",
+				"KAFKA_ADVERTISED_LISTENERS":             fmt.Sprintf("INTERNAL://kafka:9092,EXTERNAL://%s:9093", host),
+				"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":   "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT",
+				"KAFKA_INTER_BROKER_LISTENER_NAME":       "INTERNAL",
 				"KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
 				"KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
 			},
 			Networks:   []string{net.Name},
-			WaitingFor: wait.ForLog("started"),
+			WaitingFor: wait.ForListeningPort("9093/tcp").WithStartupTimeout(1 * time.Minute),
 		},
 		Started: true,
 	})
@@ -159,7 +183,11 @@ func TestMain(m *testing.M) {
 	}
 	defer kafkaContainer.Terminate(ctx)
 
-	kafkaBroker = "localhost:9093"
+	port, err := kafkaContainer.MappedPort(ctx, "9093")
+	if err != nil {
+		log.Fatalf("failed to get container port: %v", err)
+	}
+	kafkaBroker = fmt.Sprintf("%s:%s", host, port.Port())
 
 	os.Exit(m.Run())
 }

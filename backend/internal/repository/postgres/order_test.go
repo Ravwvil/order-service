@@ -66,7 +66,7 @@ func TestMain(m *testing.M) {
 	pgDatabase := "testdb"
 
 	req := testcontainers.ContainerRequest{
-		Image:        "postgres:16-alpine",
+		Image:        "postgres:16.3-alpine",
 		ExposedPorts: []string{"5432/tcp"},
 		Env: map[string]string{
 			"POSTGRES_USER":     pgUser,

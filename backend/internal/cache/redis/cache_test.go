@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 
 	req := testcontainers.ContainerRequest{
-		Image:        "redis:7-alpine",
+		Image:        "redis:7.2.5-alpine",
 		ExposedPorts: []string{"6379/tcp"},
 		WaitingFor:   wait.ForLog("Ready to accept connections"),
 	}
